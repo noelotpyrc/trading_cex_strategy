@@ -671,14 +671,6 @@ def main():
         value="ohlcv_btcusdt_1h"
     )
 
-    model_path = st.sidebar.text_input(
-        "Model Path",
-        value="/Volumes/Extreme SSD/trading_data/cex/models/binance_btcusdt_perp_1h_original/run_20251102_231428_lgbm_y_tp_before_sl_u0.04_d0.02_24h_binary/model.txt"
-    )
-
-    # Extract run name
-    run_name = Path(model_path).parent.name
-
     dataset = st.sidebar.text_input(
         "Dataset",
         value="binance_btcusdt_perp_1h"
@@ -688,6 +680,39 @@ def main():
         "Bins Root",
         value="./strategies/ml_calibrated_bins/bins"
     )
+
+    # Scan bins directory for available runs
+    bins_path = Path(bins_root) / dataset
+    available_runs = []
+    if bins_path.exists():
+        available_runs = sorted([d.name for d in bins_path.iterdir() if d.is_dir()])
+
+    if available_runs:
+        run_name = st.sidebar.selectbox(
+            "Model Run",
+            options=available_runs,
+            index=0,
+            help="Select from available runs in the bins directory"
+        )
+
+        # Auto-construct model path based on run name
+        models_base = "/Volumes/Extreme SSD/trading_data/cex/models/binance_btcusdt_perp_1h_original"
+        
+        # Infer model file extension from run name
+        if 'catboost' in run_name:
+            model_file = "model.cbm"
+        else:
+            model_file = "model.txt"
+        
+        model_path = f"{models_base}/{run_name}/{model_file}"
+        st.sidebar.caption(f"Model: `{model_file}`")
+    else:
+        st.sidebar.warning("No runs found in bins directory")
+        model_path = st.sidebar.text_input(
+            "Model Path",
+            value="/Volumes/Extreme SSD/trading_data/cex/models/binance_btcusdt_perp_1h_original/run_20251102_231428_lgbm_y_tp_before_sl_u0.04_d0.02_24h_binary/model.txt"
+        )
+        run_name = Path(model_path).parent.name
 
     # Get available date range from predictions
     min_ts, max_ts = get_prediction_time_range(pred_duckdb, model_path)
@@ -1090,7 +1115,16 @@ def main():
 
             # Per-month configuration
             st.markdown("---")
-            st.markdown("**Per-Month Configuration** (override defaults for specific months)")
+            col_header1, col_header2 = st.columns([3, 1])
+            with col_header1:
+                st.markdown("**Per-Month Configuration** (override defaults for specific months)")
+            with col_header2:
+                if st.button("🔄 Apply Defaults to All", help="Reset all months to use current default bins"):
+                    # Directly set all per-month keys to current defaults
+                    for month in available_months:
+                        st.session_state[f'long_{month}'] = default_long_bins
+                        st.session_state[f'short_{month}'] = default_short_bins
+                    st.rerun()
 
             # Initialize monthly bins config
             monthly_bins_config = {}

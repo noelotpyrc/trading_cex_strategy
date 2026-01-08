@@ -73,7 +73,7 @@ def load_predictions(
     conn.close()
 
     if not df_db.empty:
-        df_db['timestamp'] = pd.to_datetime(df_db['timestamp'])
+        df_db['timestamp'] = pd.to_datetime(df_db['timestamp']).dt.tz_localize(None)
 
     # Check if we need to fallback to CSV
     pred_train_path = Path(model_path).parent / 'pred_train.csv'
@@ -83,13 +83,13 @@ def load_predictions(
         if verbose:
             print(f"  No predictions in DuckDB, loading from {pred_train_path.name}")
         df_csv = pd.read_csv(pred_train_path)
-        df_csv['timestamp'] = pd.to_datetime(df_csv['timestamp'])
+        df_csv['timestamp'] = pd.to_datetime(df_csv['timestamp']).dt.tz_localize(None)
         df_csv = df_csv[(df_csv['timestamp'] >= start) & (df_csv['timestamp'] <= end)]
         df = df_csv[['timestamp', 'y_pred']].copy()
     elif not df_db.empty and pred_train_path.exists():
         # Check if we have gaps in DB data that CSV can fill
         df_csv = pd.read_csv(pred_train_path)
-        df_csv['timestamp'] = pd.to_datetime(df_csv['timestamp'])
+        df_csv['timestamp'] = pd.to_datetime(df_csv['timestamp']).dt.tz_localize(None)
         df_csv = df_csv[(df_csv['timestamp'] >= start) & (df_csv['timestamp'] <= end)]
 
         # Merge, preferring DuckDB data
@@ -170,6 +170,7 @@ def rebuild_bins_for_month(
     bins_root: str | Path,
     overwrite: bool = False,
     verbose: bool = True,
+    cal_start_override: str | None = None,
 ) -> Path:
     """Rebuild bins for a single month.
 
@@ -188,6 +189,8 @@ def rebuild_bins_for_month(
         bins_root: Root directory for bin files
         overwrite: If True, overwrite existing bins
         verbose: Print progress
+        cal_start_override: Optional fixed calibration start date (YYYY-MM-DD),
+                           overrides lookback_months if provided
 
     Returns:
         Path to saved bin file
@@ -196,8 +199,11 @@ def rebuild_bins_for_month(
     month_start = pd.Timestamp(bin_month)
     month_end = (month_start + pd.offsets.MonthEnd(1)).normalize() + pd.Timedelta(hours=23)
 
-    # Calibration window: lookback_months before month_start
-    cal_start = (month_start - pd.DateOffset(months=lookback_months)).normalize()
+    # Calibration window: use override if provided, else lookback_months before month_start
+    if cal_start_override:
+        cal_start = pd.Timestamp(cal_start_override).normalize()
+    else:
+        cal_start = (month_start - pd.DateOffset(months=lookback_months)).normalize()
     cal_end = month_start - pd.Timedelta(hours=1)
 
     if verbose:
@@ -285,6 +291,8 @@ def main():
                         help='Month(s) to rebuild (YYYY-MM), can specify multiple')
     parser.add_argument('--lookback-months', type=int, default=12,
                         help='Calibration window in months (default: 12)')
+    parser.add_argument('--cal-start', type=str, default=None,
+                        help='Fixed calibration start date (YYYY-MM-DD), overrides --lookback-months')
     parser.add_argument('--n-bins', type=int, default=20, help='Number of bins (default: 20)')
     parser.add_argument('--method', choices=['platt', 'isotonic'], default='platt',
                         help='Calibration method (default: platt)')
@@ -319,6 +327,7 @@ def main():
                 bins_root=args.bins_root,
                 overwrite=args.overwrite,
                 verbose=not args.quiet,
+                cal_start_override=args.cal_start,
             )
         except Exception as e:
             print(f"ERROR: Failed to rebuild bins for {bin_month}: {e}")
